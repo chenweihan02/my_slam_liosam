@@ -98,7 +98,7 @@ public:
     int Horizon_SCAN;       // 扫描一周计数，例如每隔0.2°扫描一次，一周360°可以扫描1800次
     int downsampleRate;     // 扫描线降采样，跳过一些扫描线
     float lidarMinRange;    // 最小范围
-    float lidarMxaRange;    // 最大范围
+    float lidarMaxRange;    // 最大范围
 
     // IMU
     float imuAccNoise;          // 加速度噪声标准差
@@ -155,9 +155,99 @@ public:
 
     ParamServer()
     {
+        nh.param<std::string>("/robot_id", robot_id, "roboat");
 
+        // 从param server中读取key为"lio_sam/pointCloudTopic"对应的参数，存pointCloudTopic，第三个参数是默认值
+        // launch文件中定义<rosparam file="$(find lio_sam)/config/params.yaml" command="load" />，从yaml文件加载参数
+        nh.param<std::string>("lio_sam/pointCloudTopic", pointCloudTopic, "points_raw");
+        nh.param<std::string>("lio_sam/imuTopic", imuTopic, "imu_correct");
+        nh.param<std::string>("lio_sam/odomTopic", odomTopic, "odometry/imu");
+        nh.param<std::string>("lio_sam/gpsTopic", gpsTopic, "odometry/gps");
 
+        nh.param<std::string>("lio_sam/lidarFrame", lidarFrame, "base_link");
+        nh.param<std::string>("lio_sam/baselinkFrame", baselinkFrame, "base_link");
+        nh.param<std::string>("lio_sam/odometryFrame", odometryFrame, "odom");
+        nh.param<std::string>("lio_sam/mapFrame", mapFrame, "map");
 
+        nh.param<bool>("lio_sam/useImuHeadingInitialization", useImuHeadingInitialization, false);
+        nh.param<bool>("lio_sam/useGpsElevation", useGpsElevation, false);
+        nh.param<float>("lio_sam/gpsCovThreshold", gpsCovThreshold, 2.0);
+        nh.param<float>("lio_sam/poseCovThreshold", poseCovThreshold, 25.0);
+
+        nh.param<bool>("lio_sam/savePCD", savePCD, false);
+        nh.param<std::string>("lio_sam/savePCDDirectory", savePCDDirectory, "/Downloads/LOAM/");
+
+        std::string sensorStr;
+        nh.param<std::string>("lio_sam/sensor", sensorStr, "");
+        if (sensorStr == "velodyne")
+        {
+            sensor = SensorType::VELODYNE;
+        }
+        else if (sensorStr == "ouster")
+        {
+            sensor = SensorType::OUSTER;
+        }
+        else
+        {
+            ROS_ERROR_STREAM(
+                "Invalid sensor type (must be either 'velodyne' or 'ouster'): " << sensorStr);
+            ros::shutdown();
+        }
+
+        nh.param<int>("lio_sam/N_SCAN", N_SCAN, 16);
+        nh.param<int>("lio_sam/Horizon_SCAN", Horizon_SCAN, 1800);
+        nh.param<int>("lio_sam/downsampleRate", downsampleRate, 1);
+        nh.param<float>("lio_sam/lidarMinRange", lidarMinRange, 1.0);
+        nh.param<float>("lio_sam/lidarMaxRange", lidarMaxRange, 1000.0);
+
+        nh.param<float>("lio_sam/imuAccNoise", imuAccNoise, 0.01);
+        nh.param<float>("lio_sam/imuGyrNoise", imuGyrNoise, 0.001);
+        nh.param<float>("lio_sam/imuAccBiasN", imuAccBiasN, 0.0002);
+        nh.param<float>("lio_sam/imuGyrBiasN", imuGyrBiasN, 0.00003);
+        nh.param<float>("lio_sam/imuGravity", imuGravity, 9.80511);
+        nh.param<float>("lio_sam/imuRPYWeight", imuRPYWeight, 0.01);
+        nh.param<vector<double>>("lio_sam/extrinsicRot", extRotV, vector<double>());
+        nh.param<vector<double>>("lio_sam/extrinsicRPY", extRPYV, vector<double>());
+        nh.param<vector<double>>("lio_sam/extrinsicTrans", extTransV, vector<double>());
+        extRot = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRotV.data(), 3, 3);
+        extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);
+        extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);
+        extQRPY = Eigen::Quaterniond(extRPY);
+
+        nh.param<float>("lio_sam/edgeThreshold", edgeThreshold, 0.1);
+        nh.param<float>("lio_sam/surfThreshold", surfThreshold, 0.1);
+        nh.param<int>("lio_sam/edgeFeatureMinValidNum", edgeFeatureMinValidNum, 10);
+        nh.param<int>("lio_sam/surfFeatureMinValidNum", surfFeatureMinValidNum, 100);
+
+        nh.param<float>("lio_sam/odometrySurfLeafSize", odometrySurfLeafSize, 0.2);
+        nh.param<float>("lio_sam/mappingCornerLeafSize", mappingCornerLeafSize, 0.2);
+        nh.param<float>("lio_sam/mappingSurfLeafSize", mappingSurfLeafSize, 0.2);
+
+        nh.param<float>("lio_sam/z_tollerance", z_tollerance, FLT_MAX);
+        nh.param<float>("lio_sam/rotation_tollerance", rotation_tollerance, FLT_MAX);
+
+        nh.param<int>("lio_sam/numberOfCores", numberOfCores, 2);
+        nh.param<double>("lio_sam/mappingProcessInterval", mappingProcessInterval, 0.15);
+
+        nh.param<float>("lio_sam/surroundingkeyframeAddingDistThreshold", surroundingkeyframeAddingDistThreshold, 1.0);
+        nh.param<float>("lio_sam/surroundingkeyframeAddingAngleThreshold", surroundingkeyframeAddingAngleThreshold, 0.2);
+        nh.param<float>("lio_sam/surroundingKeyframeDensity", surroundingKeyframeDensity, 1.0);
+        nh.param<float>("lio_sam/surroundingKeyframeSearchRadius", surroundingKeyframeSearchRadius, 50.0);
+
+        nh.param<bool>("lio_sam/loopClosureEnableFlag", loopClosureEnableFlag, false);
+        nh.param<float>("lio_sam/loopClosureFrequency", loopClosureFrequency, 1.0);
+        nh.param<int>("lio_sam/surroundingKeyframeSize", surroundingKeyframeSize, 50);
+        nh.param<float>("lio_sam/historyKeyframeSearchRadius", historyKeyframeSearchRadius, 10.0);
+        nh.param<float>("lio_sam/historyKeyframeSearchTimeDiff", historyKeyframeSearchTimeDiff, 30.0);
+        nh.param<int>("lio_sam/historyKeyframeSearchNum", historyKeyframeSearchNum, 25);
+        nh.param<float>("lio_sam/historyKeyframeFitnessScore", historyKeyframeFitnessScore, 0.3);
+
+        nh.param<float>("lio_sam/globalMapVisualizationSearchRadius", globalMapVisualizationSearchRadius, 1e3);
+        nh.param<float>("lio_sam/globalMapVisualizationPoseDensity", globalMapVisualizationPoseDensity, 10.0);
+        nh.param<float>("lio_sam/globalMapVisualizationLeafSize", globalMapVisualizationLeafSize, 1.0);
+
+        // TODO usleep
+        usleep(100);
     }
 
     /**
@@ -197,3 +287,73 @@ public:
         return imu_out;
     }
 };
+
+// TODO: template 用法
+/**
+ * 提取imu角速度
+*/
+template<typename T>
+void imuAngular2rosAngular(sensor_msgs::Imu *thisImuMsg, T *angular_x, T *angular_y, T *angular_z)
+{
+    *angular_x = thisImuMsg->angular_velocity.x;
+    *angular_y = thisImuMsg->angular_velocity.y;
+    *angular_z = thisImuMsg->angular_velocity.z;
+}
+
+
+/**
+ * 提取imu姿态角RPY
+*/
+template<typename T>
+void imuRPY2rosRPY(sensor_msgs::Imu *thisImuMsg, T *rosRoll, T *rosPitch, T *rosYaw)
+{
+    double imuRoll, imuPitch, imuYaw;
+    tf::Quaternion orientation;
+    tf::quaternionMsgToTF(thisImuMsg->orientation, orientation);
+    tf::Matrix3x3(orientation).getRPY(imuRoll, imuPitch, imuYaw);
+
+    *rosRoll = imuRoll;
+    *rosPitch = imuPitch;
+    *rosYaw = imuYaw;
+}
+
+/**
+ * 点到坐标系原点距离
+*/
+float pointDistance(PointType p)
+{
+    return sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+}
+
+/**
+ * 两点之间距离
+*/
+float pointDistance(PointType p1, PointType p2)
+{
+    return sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y) + (p1.z-p2.z)*(p1.z-p2.z));
+}
+
+/**
+ * 发布thisCloud，返回thisCloud对应msg格式
+*/
+sensor_msgs::PointCloud2 publishCloud(ros::Publisher *thisPub, pcl::PointCloud<PointType>::Ptr thisCloud, ros::Time thisStamp, std::string thisFrame)
+{
+    sensor_msgs::PointCloud2 tempCloud;
+    pcl::toROSMsg(*thisCloud, tempCloud);
+    tempCloud.header.stamp = thisStamp;
+    tempCloud.header.frame_id = thisFrame;
+    if (thisPub->getNumSubscribers() != 0)
+        thisPub->publish(tempCloud);
+    return tempCloud;
+}
+
+/**
+ * msg时间戳
+*/
+template<typename T>
+double ROS_TIME(T msg)
+{
+    return msg->header.stamp.toSec();
+}
+
+#endif
