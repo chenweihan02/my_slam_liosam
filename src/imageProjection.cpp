@@ -146,7 +146,7 @@ public:
         fullCloud.reset(new pcl::PointCloud<PointType>());
         extractedCloud.reset(new pcl::PointCloud<PointType>());
 
-        // TODO: Horizon_SCAN原理？
+        // TODO: Horizon_SCAN原理？ 点云的数据类型
         fullCloud->points.resize(N_SCAN*Horizon_SCAN);
 
         cloudInfo.startRingIndex.assign(N_SCAN, 0);

@@ -14,7 +14,7 @@
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
-#include <opencv2/opencv.hpp>
+#include <opencv/cv.h>
 
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -27,14 +27,14 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl/filters/filter.h>
 #include <pcl/filters/voxel_grid.h>
-#include <pcl/filters/crop_box.h> 
+#include <pcl/filters/crop_box.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <tf/LinearMath/Quaternion.h>
 #include <tf/transform_listener.h>
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
- 
+
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -57,40 +57,42 @@ using namespace std;
 
 typedef pcl::PointXYZI PointType;
 
-// 传感器型号
-enum class SensorType { VELODYNE, OUSTER };
+enum class SensorType
+{
+    VELODYNE,
+    OUSTER
+};
 
 class ParamServer
 {
 public:
-
     ros::NodeHandle nh;
 
     std::string robot_id;
 
-    // 话题
+    // Topics
     string pointCloudTopic; // points_raw 原始点云数据
     string imuTopic;        // imu_raw 对应park数据集，imu_correct对应outdoor数据集，都是原始imu数据，不同的坐标系表示
     string odomTopic;       // odometry/imu，imu里程计，imu积分计算得到
     string gpsTopic;        // odometry/gps，gps里程计
 
-    // 坐标系
+    // Frames
     string lidarFrame;      // 激光坐标系
     string baselinkFrame;   // 载体坐标系
     string odometryFrame;   // 里程计坐标系
     string mapFrame;        // 世界坐标系
 
-    // GPS参数
-    bool useImuHeadingInitialization;   //
+    // GPS Settings
+    bool useImuHeadingInitialization;
     bool useGpsElevation;
     float gpsCovThreshold;
     float poseCovThreshold;
 
-    // 保存PCD
+    // Save pcd
     bool savePCD;               // 是否保存地图
     string savePCDDirectory;    // 保存路径
 
-    // 激光传感器参数
+    // Lidar Sensor Configuration
     SensorType sensor;      // 传感器型号
     int N_SCAN;             // 扫描线数，例如16、64
     int Horizon_SCAN;       // 扫描一周计数，例如每隔0.2°扫描一次，一周360°可以扫描1800次
@@ -98,12 +100,12 @@ public:
     float lidarMinRange;    // 最小范围
     float lidarMaxRange;    // 最大范围
 
-    // IMU参数
+    // IMU
     float imuAccNoise;          // 加速度噪声标准差
     float imuGyrNoise;          // 角速度噪声标准差
-    float imuAccBiasN;          //
-    float imuGyrBiasN;
-    float imuGravity;           // 重力加速度
+    float imuAccBiasN;
+    float imuGyrBiasN;           // 重力加速度
+    float imuGravity;
     float imuRPYWeight;
     vector<double> extRotV;
     vector<double> extRPYV;
@@ -119,31 +121,31 @@ public:
     int edgeFeatureMinValidNum;
     int surfFeatureMinValidNum;
 
-    // voxel filter paprams
+    // voxel filter params
     float odometrySurfLeafSize;
     float mappingCornerLeafSize;
-    float mappingSurfLeafSize ;
+    float mappingSurfLeafSize;
 
-    float z_tollerance; 
+    float z_tollerance;
     float rotation_tollerance;
 
-    // CPU Params
+    // CPU Parmas
     int numberOfCores;
     double mappingProcessInterval;
 
     // Surrounding map
-    float surroundingkeyframeAddingDistThreshold; 
-    float surroundingkeyframeAddingAngleThreshold; 
+    float surroundingkeyframeAddingDistThreshold;
+    float surroundingkeyframeAddingAngleThreshold;
     float surroundingKeyframeDensity;
     float surroundingKeyframeSearchRadius;
-    
+
     // Loop closure
-    bool  loopClosureEnableFlag;
+    bool loopClosureEnableFlag;
     float loopClosureFrequency;
-    int   surroundingKeyframeSize;
+    int surroundingKeyframeSize;
     float historyKeyframeSearchRadius;
     float historyKeyframeSearchTimeDiff;
-    int   historyKeyframeSearchNum;
+    int historyKeyframeSearchNum;
     float historyKeyframeFitnessScore;
 
     // global map visualization radius
@@ -244,12 +246,14 @@ public:
         nh.param<float>("lio_sam/globalMapVisualizationPoseDensity", globalMapVisualizationPoseDensity, 10.0);
         nh.param<float>("lio_sam/globalMapVisualizationLeafSize", globalMapVisualizationLeafSize, 1.0);
 
+        // TODO usleep
         usleep(100);
     }
 
     /**
-     * imu原始测量数据转换到lidar系，加速度、角速度、RPY
+     * imu原始数据转换到lidar系，加速度、角速度、RPY
     */
+    // TODO: 坐标转换 
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
     {
         sensor_msgs::Imu imu_out = imu_in;
@@ -284,6 +288,50 @@ public:
     }
 };
 
+// TODO: template 用法
+/**
+ * 提取imu角速度
+*/
+template<typename T>
+void imuAngular2rosAngular(sensor_msgs::Imu *thisImuMsg, T *angular_x, T *angular_y, T *angular_z)
+{
+    *angular_x = thisImuMsg->angular_velocity.x;
+    *angular_y = thisImuMsg->angular_velocity.y;
+    *angular_z = thisImuMsg->angular_velocity.z;
+}
+
+
+/**
+ * 提取imu姿态角RPY
+*/
+template<typename T>
+void imuRPY2rosRPY(sensor_msgs::Imu *thisImuMsg, T *rosRoll, T *rosPitch, T *rosYaw)
+{
+    double imuRoll, imuPitch, imuYaw;
+    tf::Quaternion orientation;
+    tf::quaternionMsgToTF(thisImuMsg->orientation, orientation);
+    tf::Matrix3x3(orientation).getRPY(imuRoll, imuPitch, imuYaw);
+
+    *rosRoll = imuRoll;
+    *rosPitch = imuPitch;
+    *rosYaw = imuYaw;
+}
+
+/**
+ * 点到坐标系原点距离
+*/
+float pointDistance(PointType p)
+{
+    return sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+}
+
+/**
+ * 两点之间距离
+*/
+float pointDistance(PointType p1, PointType p2)
+{
+    return sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y) + (p1.z-p2.z)*(p1.z-p2.z));
+}
 
 /**
  * 发布thisCloud，返回thisCloud对应msg格式
@@ -308,58 +356,7 @@ double ROS_TIME(T msg)
     return msg->header.stamp.toSec();
 }
 
-/**
- * 提取imu角速度
-*/
-template<typename T>
-void imuAngular2rosAngular(sensor_msgs::Imu *thisImuMsg, T *angular_x, T *angular_y, T *angular_z)
-{
-    *angular_x = thisImuMsg->angular_velocity.x;
-    *angular_y = thisImuMsg->angular_velocity.y;
-    *angular_z = thisImuMsg->angular_velocity.z;
-}
-
-/**
- * 提取imu加速度
-*/
-template<typename T>
-void imuAccel2rosAccel(sensor_msgs::Imu *thisImuMsg, T *acc_x, T *acc_y, T *acc_z)
-{
-    *acc_x = thisImuMsg->linear_acceleration.x;
-    *acc_y = thisImuMsg->linear_acceleration.y;
-    *acc_z = thisImuMsg->linear_acceleration.z;
-}
-
-/**
- * 提取imu姿态角RPY
-*/
-template<typename T>
-void imuRPY2rosRPY(sensor_msgs::Imu *thisImuMsg, T *rosRoll, T *rosPitch, T *rosYaw)
-{
-    double imuRoll, imuPitch, imuYaw;
-    tf::Quaternion orientation;
-    tf::quaternionMsgToTF(thisImuMsg->orientation, orientation);
-    tf::Matrix3x3(orientation).getRPY(imuRoll, imuPitch, imuYaw);
-
-    *rosRoll = imuRoll;
-    *rosPitch = imuPitch;
-    *rosYaw = imuYaw;
-}
-
-/**
- * 点到坐标系原点距离
-*/
-float pointDistance(PointType p)
-{
-    return sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
-}
-
-/**
- * 两点之间距离
-*/
-float pointDistance(PointType p1, PointType p2)
-{
-    return sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y) + (p1.z-p2.z)*(p1.z-p2.z));
-}
+// =============================================================================================
+// =============================================================================================
 
 #endif

@@ -14,5 +14,9 @@
 
 ---
 
+参考：[smilefacehh/LIO-SAM-DetailedNote](https://github.com/smilefacehh/LIO-SAM-DetailedNote)
+
+---
+
 http://docs.ros.org/en/api/sensor_msgs/html/msg/PointCloud2.html
 http://docs.ros.org/en/api/sensor_msgs/html/msg/PointCloud.html
