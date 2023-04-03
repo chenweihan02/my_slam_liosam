@@ -14,6 +14,7 @@
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
+// #include <opencv/cv.h>
 #include <opencv2/opencv.hpp>
 
 #include <pcl/point_cloud.h>
@@ -58,7 +59,7 @@ using namespace std;
 typedef pcl::PointXYZI PointType;
 
 // 传感器型号
-enum class SensorType { VELODYNE, OUSTER };
+enum class SensorType { VELODYNE, OUSTER, LIVOX };
 
 class ParamServer
 {
@@ -185,10 +186,14 @@ public:
         {
             sensor = SensorType::OUSTER;
         }
+        else if (sensorStr == "livox")
+        {
+            sensor = SensorType::LIVOX;
+        }
         else
         {
             ROS_ERROR_STREAM(
-                "Invalid sensor type (must be either 'velodyne' or 'ouster'): " << sensorStr);
+                "Invalid sensor type (must be either 'velodyne' or 'ouster' or 'livox'): " << sensorStr);
             ros::shutdown();
         }
 
@@ -211,6 +216,8 @@ public:
         extRPY = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extRPYV.data(), 3, 3);
         extTrans = Eigen::Map<const Eigen::Matrix<double, -1, -1, Eigen::RowMajor>>(extTransV.data(), 3, 1);
         extQRPY = Eigen::Quaterniond(extRPY);
+        // TODO 这个代码和上面的代码的区别
+        // extQRPY = Eigen::Quaterniond(extRPY).inverse(); TOOD?
 
         nh.param<float>("lio_sam/edgeThreshold", edgeThreshold, 0.1);
         nh.param<float>("lio_sam/surfThreshold", surfThreshold, 0.1);
@@ -244,12 +251,14 @@ public:
         nh.param<float>("lio_sam/globalMapVisualizationPoseDensity", globalMapVisualizationPoseDensity, 10.0);
         nh.param<float>("lio_sam/globalMapVisualizationLeafSize", globalMapVisualizationLeafSize, 1.0);
 
+        // TODO usleep
         usleep(100);
     }
 
     /**
      * imu原始测量数据转换到lidar系，加速度、角速度、RPY
     */
+    // TODO：slam14 坐标系转换
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu& imu_in)
     {
         sensor_msgs::Imu imu_out = imu_in;
@@ -288,14 +297,15 @@ public:
 /**
  * 发布thisCloud，返回thisCloud对应msg格式
 */
-sensor_msgs::PointCloud2 publishCloud(ros::Publisher *thisPub, pcl::PointCloud<PointType>::Ptr thisCloud, ros::Time thisStamp, std::string thisFrame)
+template<typename T>
+sensor_msgs::PointCloud2 publishCloud(const ros::Publisher& thisPub, const T& thisCloud, ros::Time thisStamp, std::string thisFrame)
 {
     sensor_msgs::PointCloud2 tempCloud;
     pcl::toROSMsg(*thisCloud, tempCloud);
     tempCloud.header.stamp = thisStamp;
     tempCloud.header.frame_id = thisFrame;
-    if (thisPub->getNumSubscribers() != 0)
-        thisPub->publish(tempCloud);
+    if (thisPub.getNumSubscribers() != 0)
+        thisPub.publish(tempCloud);
     return tempCloud;
 }
 
@@ -308,6 +318,7 @@ double ROS_TIME(T msg)
     return msg->header.stamp.toSec();
 }
 
+// TODO: template 用法
 /**
  * 提取imu角速度
 */
